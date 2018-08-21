@@ -20,7 +20,7 @@
 
 ## Steps to run the script
 
-The project has be run in spark-shell
+The project has to be run in spark-shell
 1) On  CDH QuickStart VM open the terminal and strat the Spark Shell using spark-shell command
 2) Update the input file location on line #29 of the script src/main/scala/weblogchallenge.sc
 3) Then Copy the code snippet
