@@ -1,0 +1,164 @@
+/*************************************
+ ** STEPS TO RUN THE SCRIPT **
+ *************************************
+ *  1. To run the script copy and paste this script using :paste mode in spark-shell 
+ *  2. Hit Ctrl + D to compile and run the script
+ *  
+ *  IMPORTANT NOTE: The input file location needs to be updated before running the 
+ *                   script 
+ */
+
+
+/** 
+ * Beginning of script 
+ */
+
+import org.apache.spark.sql.expressions.Window
+
+//Constant defining the duration (in seconds) after which session is considered to be expired
+val sessionWindow = 30*60
+
+
+/** 1. Read the required data from the given ELB log file 
+ *     and convert the  RDD to DataFrame.
+ *     While reading the data split the client:port field by ':'to get 
+ *     the client ipaddress 
+ *  2. Convert the time (given in ISO 8601 format) from String to Unix 
+ *     timestamp for further calculations involving timestamp
+ */
+val elbLog = sc.textFile("paytm/data/2015_07_22_mktplace_shop_web_log_sample.log")
+               .map(_.split(" "))
+               .map(l => (l(2).split(":")(0), l(0).replace('T',' '), l(12)))
+               .toDF("ipaddr", "currTimestamp", "url")
+
+val logWithUnixTS = elbLog
+                      .select('ipaddr, unix_timestamp($"currTimestamp")
+                                           .as('currTimestamp), 'url)
+
+
+/** 1. Define the window to partition the rows by ipaddress and sort by timestamp
+ *  2. Use a sliding window of size 2 over the rows partitioned by ipaddress and 
+ *     sorted by timestamp, using the lag('currTimestamp, 1) window function 
+ *  3. The timestamp of the previous row is turned into a new column prevTimestamp
+ *  4. Next a new column [isNewSession] is created which contains a 0 or 1 depending 
+ *     on whether the row is in a different session to the previous row
+ */
+val windowSpec1 = Window.partitionBy('ipaddr)
+                        .orderBy('currTimestamp)
+val logWithSessionFlag = logWithUnixTS
+                            .select('ipaddr, 'currTimestamp, 
+                               lag('currTimestamp, 1).over(windowSpec1)
+                               .as('prevTimestamp), 'url)
+                            .select('ipaddr, 'currTimestamp, 'url, 
+                               when('currTimestamp.minus('prevTimestamp) < lit(sessionWindow), 
+                               lit(0)).otherwise(lit(1)).as('isNewSession))
+
+/** 1. Define the window to partition the rows by ipaddress and sort by ipaddress & timestamp
+ *  2. Add a column [sessionId] with the running total of [isNewSession] column's 0's and 1's, 
+ *     which becomes a sequential session ID for each session of an ipaddress.
+ */
+val windowSpec2 = Window.partitionBy('ipaddr)
+                        .orderBy('ipaddr, 'currTimestamp)
+val sessionizedLog = logWithSessionFlag
+                        .select('ipaddr, 'currTimestamp, 'url, 
+                                sum('isNewSession).over(windowSpec2).as('sessionId))
+
+
+/** 1. Format the timestamp to a readble format before writing it to the file 
+ *  2. Define the header(schema) to be included in the file
+ *  3. Add the header and save the sessionizedLog to HDFS file
+ */
+val finalSessionizedLog = sessionizedLog
+                             .select('ipaddr, 'sessionId, 
+                                     from_unixtime($"currTimestamp","yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")
+                                     .as('currTimestamp), 'url)
+
+val header = sc.parallelize(Array("IPADDR, SESSION_ID, TIMESTAMP, URL"))
+header.union(finalSessionizedLog.map(r => r.mkString(",")))
+      .coalesce(1).saveAsTextFile("paytm/output/Sessionized_WebLog")
+
+/***************************************************************************/
+/*************Aggregated page hits by ipaddr during a session**************/
+
+/** 1. Perform aggregations to get session metrics for each ipaddress like 
+ *     session start time, session end time, session duration & page hits
+ *  2. Read the ipaddress, session ID & aggregated pagehits for session
+ *     in order to save it into [Page_Hits_PerSession_Log] 
+ */
+
+//These aggregations are used for further aggregations & analysis 
+val sessionData = sessionizedLog.groupBy("ipaddr", "sessionId")
+                                .agg(min("currTimestamp").as("sessionStartTime"), 
+                                     max("currTimestamp").as("sessionEndTime"),
+                                     (max("currTimestamp")-min("currTimestamp")).as("sessionDuration"), 
+                                     count("*").as("sessionPageHits"))
+
+val pageHitsPerSessions = sessionData.select('ipaddr, 'sessionId, 'sessionPageHits)
+
+/** 1. Define the header(schema) to be included in the file
+ *  2. Add the header and save the aggregrated page hits by visitor/IP during a session 
+ *     [pageHitsPerSessions] to HDFS file
+ */
+val header1 = sc.parallelize(Array("IPADDR, SESSION_ID, PAGE_HITS"))
+header1.union(pageHitsPerSessions.map(r => r.mkString(",")))
+       .coalesce(1).saveAsTextFile("paytm/output/Page_Hits_Per_Session_Log")
+
+/**************************Average session time***************************/
+
+/** 1. Calculate the average session time for all ipaddresses
+ *  2. Save it to HDFS file  
+ */
+val avgSessionTime = sessionData.agg(avg("sessionDuration"))
+
+avgSessionTime.map(r => "Avg session time is: " + r.mkString + " secs")
+              .saveAsTextFile("paytm/output/Avg_Session_Time")
+
+
+/** Calculate the average session time for each visitor/ipaddress
+ */
+val avgSessionTimePerIP = sessionData.groupBy("ipaddr")
+                                     .agg(avg("sessionDuration").as("avgSessionTime"))
+
+/** 1. Define the header(schema) to be included in the file
+ *  2. Add the header and save the average session time by visitor/IP during 
+ *     a session [avgSessionTimePerIP] to HDFS file
+ */
+val header2 = sc.parallelize(Array("IPADDR, AVG_SESSION_DURATION_SECS"))
+header2.union(avgSessionTimePerIP.map(r => r.mkString(",")))
+       .coalesce(1).saveAsTextFile("paytm/output/Avg_Session_Time_Per_IP")
+
+/**********************Unique URL visits per session**********************/
+
+/** Count the unique url hits per ipaddress & session
+ */
+val uniqueUrlHits = sessionizedLog.groupBy("ipaddr","sessionId")
+                                  .agg(countDistinct("url").as("uniqueUrlHits"))
+
+/** 1. Define the header(schema) to be included in the file
+ *  2. Add the header and save the unique url hits per ipaddress & 
+ *     session [uniqueUrlHits] to HDFS file
+ */
+val header3 = sc.parallelize(Array("IPADDR, SESSION_ID, UNIQUE_URL_HITS"))
+header3.union(uniqueUrlHits.map(r => r.mkString(",")))
+       .coalesce(1).saveAsTextFile("paytm/output/unique_url_hits")
+
+/***************************Most engaged users****************************/
+
+/** Find the most engaged users (top 50) by session duration
+ */
+val mostEngagedUsers = sessionData.select('ipaddr, 'sessionDuration, 
+                                         dense_rank().over(Window.orderBy('sessionDuration.desc))
+                                         .as("mostEngagedUsers")).filter("mostEngagedUsers <= 50")
+
+/** 1. Define the header(schema) to be included in the file
+ *  2. Add the header and save the top 50 users determined by 
+ *     session duration [mostEngagedUsers] to HDFS file
+ */
+val header4 = sc.parallelize(Array("IPADDR, SESSION_DURATION, USER_ENGAGEMENT_RANKING"))
+header4.union(mostEngagedUsers.map(r => r.mkString(",")))
+       .coalesce(1).saveAsTextFile("paytm/output/most_engaged_users")
+
+
+/** 
+ * End of script 
+ */
