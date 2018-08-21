@@ -22,7 +22,7 @@
 
 The project has to be run in spark-shell
 1) On  CDH QuickStart VM open the terminal and strat the Spark Shell using spark-shell command
-2) Update the input file location on line #29 of the script src/main/scala/weblogchallenge.sc
+2) Update the input file location on line #29 of the script src/main/scala/weblogchallenge
 3) Then Copy the code snippet
 3) Enter paste mode in spark shell using :paste and paste the code
 4) Hit Ctrl + D after pasting the code
