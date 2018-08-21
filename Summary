@@ -1,0 +1,85 @@
+------------------------------------
+ Summary of analysis
+------------------------------------
+
+1) The maximum time window between two requests was taken as 30 mins after which the session is deemed to have ended. Though 30 mins, 
+   60 mins or even 120 mins session windows are used in the indusrty depending on the type of the site (ecommerce site, blog, social 
+   media sites, digital media platforms, brochure websites, video streaming sites ect), a 30 min window would suffice in general. 
+   
+2) All logs were sessionized using the 30 min time window.
+
+   A good way to establish the appropriate amount of time for session timeout is to add a buffer to the average session duration time. 
+   That would build a more accurate record and remove extreme outliers from the data mix, thereby lowering the chances of having 
+   skewed numbers.
+
+3) Pages hits per session broadly gauges how compelling users find the content and the ease of access, but tread with caution as this is 
+   not always the case. Consider the average time on site and bounce rate along with the pages per session metric for better analysis.
+   To sum up, it is very importance to consider the site analytics metrics all together to avoid making inaccurate judgements.
+   
+   The maximum pages per session are 13431, with the average pages per session being ~11. 
+   
+   There are 20086 sessions with > 11 (the avg page hits per session) 
+
+4) The average session time is about 163.97 secs ( ~2 mins 44 secs). The max session duration being 3249 secs ( ~54 mins 9 secs) 
+
+   The average session is a helpful metric to gauge the user engagement. However, usually there is a margin of error involved in this 
+   metric. As the time spent on a page isn’t tracked on bounced visits (i.e single page visits), nor is it tracked on the last page of 
+   multi-page visits to websites. There were 24,640 bounced visits logged in the log provided. So, the average session duration could 
+   be slightly higher in reality than what is projected in the logs.
+
+5) While reading the url data from the request field of the log, I have fetched the complete url which includes the query string. 
+   Alternatively, the query string can be trimmed by splitting url at "?" and fetching the 1st half of the string if required. 
+
+6) Most engaged users (IPs with the longest session times)
+
+---------------+---------------+----------------+                              
+|         ipaddr|sessionDuration|mostEngagedUsers|
++---------------+---------------+----------------+
+|  220.226.206.7|           3249|               1|
+|   52.74.219.71|           2069|               2|
+|  119.81.61.166|           2069|               2|
+|  106.186.23.95|           2069|               2|
+|   125.20.39.66|           2068|               3|
+|   125.19.44.66|           2068|               3|
+|   192.8.190.10|           2067|               4|
+| 180.211.69.209|           2067|               4|
+|  54.251.151.39|           2067|               4|
+| 203.189.176.14|           2066|               5|
+| 202.167.250.59|           2066|               5|
+|  122.15.156.64|           2066|               5|
+| 180.179.213.70|           2066|               5|
+| 203.191.34.178|           2066|               5|
+| 103.29.159.138|           2065|               6|
+| 125.16.218.194|           2065|               6|
+| 180.151.80.140|           2065|               6|
+|     46.4.95.15|           2065|               6|
+|213.239.204.204|           2065|               6|
+|    78.46.60.71|           2064|               7|
++---------------+---------------+----------------+
+
+220.226.206.7 - belongs to Reliance Communications  
+52.74.219.71 - belongs to Amazon organization (found multiple ip addresses registered for amazon)
+
+If the requirement is to analyse either only human generated requests or only bot traffic for SEO, then bots/crawlers/sprider requests 
+can be filtered out from the log, by using the user_agent field. Good bots generally identify themselves in their user_agent string or 
+check for missing user_agent field. Also, bots can request several pages in parallel, in which case they will have many more requests 
+per time interval than their human counterparts, such anamolies in the log can help us identify the bot traffic.
+
+-----------------------------------------------
+Additional Problem
+-----------------------------------------------
+IP addresses do not guarantee distinct users, but this is the limitation of the data. As a bonus, consider 
+what additional data would help make better analytical conclusions
+
+Solution:
+---------
+There are many visitor tracking methods available, ranging from using javascripts, cookies to log based methods. In the given scenario,
+working with the data present in the log identification of distinct user can be better performed using (IPaddress + user_agent).
+user_agent field contains the device and browser info, therefore it can be used alongwith ipaddress to better identify distinct users.
+
+The log would then be sessionized by partitioning over ipaddress and the user agent instead of just partitioning over ip address
+
+NOTE: While this method is still susceptible to proxying and caching, the addition of the user-agent information can help detect multiple 
+users from one IP address. This method does not require any additional configuration and is one of the least intrusive methods to track
+sessions therefore it is the easiest to use. This method is good for getting a general idea of traffic and user behavior, but is not 
+reliable for exact measurements.
